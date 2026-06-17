@@ -19,9 +19,11 @@ function Header() {
       <nav style={styles.links}>
         <Link to="/" style={styles.link}>Home</Link>
         <Link to="/about" style={styles.link}>About</Link>
+        <Link to="/leaderboard" style={styles.link}>Leaderboard</Link>
         <Link to="/blood-request" style={styles.link}>Requests</Link>
         {user ? (
           <>
+            {user.role === 'donor' && <Link to="/rewards" style={styles.link}>Rewards</Link>}
             <Link to="/dashboard" style={styles.link}>Dashboard</Link>
             <button onClick={handleLogout} style={{...styles.link, background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1rem', padding: 0}}>Logout</button>
           </>

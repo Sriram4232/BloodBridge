@@ -22,10 +22,12 @@ app.use('/api', apiLimiter);
 // Route imports
 const authRoutes = require('./routes/authRoute');
 const requestRoutes = require('./routes/requestRoute');
+const userRoutes = require('./routes/userRoute');
 
 // Mount routers
 app.use('/api/auth', authRoutes);
 app.use('/api/requests', requestRoutes);
+app.use('/api/users', userRoutes);
 
 app.get('/', (req, res) => {
   res.send('Blood Bridge API is running...');

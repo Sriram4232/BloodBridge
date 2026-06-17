@@ -8,6 +8,8 @@ import About from './pages/About';
 import DonorDashboard from './pages/DonorDashboard';
 import BloodRequestDashboard from './pages/BloodRequestDashboard';
 import HospitalDashboard from './pages/HospitalDashboard';
+import Leaderboard from './pages/Leaderboard';
+import Rewards from './pages/Rewards';
 
 function DashboardRouter() {
   const { user } = useAuth();
@@ -33,6 +35,8 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/about" element={<About />} />
           <Route path="/dashboard" element={<DashboardRouter />} />
+          <Route path="/leaderboard" element={<Leaderboard />} />
+          <Route path="/rewards" element={<Rewards />} />
           <Route path="/blood-request" element={<BloodRequestDashboard />} />
         </Routes>
       </Router>

@@ -12,7 +12,7 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const login = async (email, password) => {
+  const login = async (email, password, location = null) => {
     setLoading(true);
     setError(null);
     try {
@@ -21,7 +21,7 @@ export function AuthProvider({ children }) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, location }),
       });
       
       const data = await response.json();
@@ -41,7 +41,7 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const register = async ({ name, email, password, bloodType, role, location }) => {
+  const register = async ({ name, email, password, bloodType, role, location, cityName }) => {
     setLoading(true);
     setError(null);
     try {
@@ -50,7 +50,7 @@ export function AuthProvider({ children }) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ name, email, password, bloodType, role, location }),
+        body: JSON.stringify({ name, email, password, bloodType, role, location, cityName }),
       });
       
       const data = await response.json();
@@ -76,8 +76,31 @@ export function AuthProvider({ children }) {
     setError(null);
   };
 
+  const refreshUser = async () => {
+    const savedUser = localStorage.getItem('bloodbridge_user');
+    if (!savedUser) return;
+    const parsedUser = JSON.parse(savedUser);
+    if (!parsedUser || !parsedUser.token) return;
+
+    try {
+      const response = await fetch(`${API_URL}/api/users/profile`, {
+        headers: {
+          'Authorization': `Bearer ${parsedUser.token}`
+        }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const updatedUser = { ...parsedUser, ...data };
+        localStorage.setItem('bloodbridge_user', JSON.stringify(updatedUser));
+        setUser(updatedUser);
+      }
+    } catch (err) {
+      console.error('Failed to refresh user profile:', err);
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, error, login, register, logout }}>
+    <AuthContext.Provider value={{ user, setUser, loading, error, login, register, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

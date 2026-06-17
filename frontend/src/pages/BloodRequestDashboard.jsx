@@ -3,7 +3,7 @@ import { useAuth, API_URL } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
 function BloodRequestDashboard() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const navigate = useNavigate();
 
   const [requests, setRequests] = useState([]);
@@ -16,6 +16,11 @@ function BloodRequestDashboard() {
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
 
+  // Accept donation states
+  const [donationSuccess, setDonationSuccess] = useState('');
+  const [donationError, setDonationError] = useState('');
+  const [acceptLoadingId, setAcceptLoadingId] = useState(null);
+
   const [formData, setFormData] = useState({
     patientName: '',
     bloodTypeRequired: 'O+',
@@ -24,6 +29,7 @@ function BloodRequestDashboard() {
     hospitalName: '',
     hospitalLocation: '',
     contactNumber: '',
+    radius: 2,
   });
 
   // Filter states
@@ -49,7 +55,47 @@ function BloodRequestDashboard() {
 
   useEffect(() => {
     fetchRequests();
+    if (refreshUser) {
+      refreshUser();
+    }
   }, []);
+
+  const getRemainingCoolingDays = () => {
+    if (!user?.coolingPeriodEnd) return 0;
+    const end = new Date(user.coolingPeriodEnd);
+    const diff = end - new Date();
+    return diff > 0 ? Math.ceil(diff / (24 * 60 * 60 * 1000)) : 0;
+  };
+
+  const coolingDays = getRemainingCoolingDays();
+
+  const handleAcceptDonation = async (reqId) => {
+    setDonationError('');
+    setDonationSuccess('');
+    setAcceptLoadingId(reqId);
+    try {
+      const response = await fetch(`${API_URL}/api/requests/${reqId}/donate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user?.token}`
+        }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to accept donation.');
+      }
+      setDonationSuccess('Donation accepted successfully! The requestee can now verify your donation.');
+      fetchRequests();
+      if (refreshUser) {
+        refreshUser();
+      }
+    } catch (err) {
+      setDonationError(err.message);
+    } finally {
+      setAcceptLoadingId(null);
+    }
+  };
 
   const openForm = (urgencyLevel = 'Normal') => {
     if (!user) {
@@ -64,6 +110,7 @@ function BloodRequestDashboard() {
       hospitalName: '',
       hospitalLocation: '',
       contactNumber: '',
+      radius: 2,
     });
     setFormError('');
     setFormSuccess('');
@@ -97,6 +144,31 @@ function BloodRequestDashboard() {
       return;
     }
 
+    // Obtain coordinates for the request
+    let coordinates = [82.2198, 16.7324]; // Fallback (Uppalaguptam)
+    if (user?.location?.coordinates) {
+      coordinates = user.location.coordinates;
+    }
+
+    const getBrowserCoords = () => {
+      return new Promise((resolve) => {
+        if (!navigator.geolocation) {
+          resolve(null);
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (position) => resolve([position.coords.longitude, position.coords.latitude]),
+          () => resolve(null),
+          { timeout: 3000 }
+        );
+      });
+    };
+
+    const browserCoords = await getBrowserCoords();
+    if (browserCoords) {
+      coordinates = browserCoords;
+    }
+
     try {
       const response = await fetch(`${API_URL}/api/requests`, {
         method: 'POST',
@@ -104,7 +176,11 @@ function BloodRequestDashboard() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${user.token}`,
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          coordinates,
+          radius: Number(formData.radius) || 2
+        }),
       });
 
       const data = await response.json();
@@ -121,6 +197,7 @@ function BloodRequestDashboard() {
         hospitalName: '',
         hospitalLocation: '',
         contactNumber: '',
+        radius: 2,
       });
       fetchRequests();
       setTimeout(() => {
@@ -155,6 +232,27 @@ function BloodRequestDashboard() {
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 pt-28 pb-16 px-4 md:px-8">
       {/* Top Banner Dashboard */}
       <div className="max-w-7xl mx-auto">
+        {donationSuccess && (
+          <div className="mb-6 p-4 bg-emerald-500/20 border border-emerald-500/50 rounded-2xl text-emerald-200 text-sm flex items-center gap-2">
+            <span>✅ {donationSuccess}</span>
+          </div>
+        )}
+        {donationError && (
+          <div className="mb-6 p-4 bg-red-500/20 border border-red-500/50 rounded-2xl text-red-200 text-sm flex items-center gap-2">
+            <span>⚠️ {donationError}</span>
+          </div>
+        )}
+        {user?.isFrozen && (
+          <div className="mb-6 p-4 bg-amber-500/20 border border-amber-500/50 rounded-2xl text-amber-200 text-sm">
+            🔒 <strong>Account Frozen:</strong> Your trust score is low ({user?.trustScore}/100). Account is restricted until verified documentation is submitted.
+          </div>
+        )}
+        {coolingDays > 0 && (
+          <div className="mb-6 p-4 bg-blue-500/20 border border-blue-500/50 rounded-2xl text-blue-200 text-sm">
+            ❄️ <strong>Donation Cooling Period:</strong> A person cannot donate frequently. Your account is frozen for <strong>{coolingDays} more day(s)</strong>.
+          </div>
+        )}
+
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-12">
           <div>
             <h1 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-red-400 via-pink-500 to-red-600 bg-clip-text text-transparent mb-3">
@@ -359,7 +457,7 @@ function BloodRequestDashboard() {
                       </div>
                     </div>
 
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 w-full">
                       <a
                         href={`tel:${req.contactNumber}`}
                         className={`w-full py-2.5 rounded-xl text-xs font-semibold text-center transition-all ${
@@ -368,8 +466,17 @@ function BloodRequestDashboard() {
                             : 'bg-white/10 hover:bg-white/15 text-slate-200'
                         }`}
                       >
-                        Contact / Donate
+                        📞 Call {req.contactNumber}
                       </a>
+                      {user && user.role === 'donor' && (
+                        <button
+                          onClick={() => handleAcceptDonation(req._id)}
+                          disabled={acceptLoadingId === req._id || coolingDays > 0 || user?.isFrozen}
+                          className="w-full py-2.5 rounded-xl text-xs font-semibold text-center transition bg-red-650 hover:bg-red-750 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {acceptLoadingId === req._id ? 'Accepting...' : '🤝 Accept Donation'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -463,23 +570,39 @@ function BloodRequestDashboard() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Urgency Level</label>
-                <select
-                  name="urgency"
-                  value={formData.urgency}
-                  onChange={handleInputChange}
-                  disabled={formData.urgency === 'Critical'}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-75 disabled:cursor-not-allowed"
-                >
-                  <option value="Normal">Normal</option>
-                  <option value="High">High</option>
-                  <option value="Critical">Critical (Emergency)</option>
-                </select>
-                {formData.urgency === 'Critical' && (
-                  <p className="text-[10px] text-red-400 mt-1 font-medium">Locked to Critical for Emergency Request</p>
-                )}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Urgency Level</label>
+                  <select
+                    name="urgency"
+                    value={formData.urgency}
+                    onChange={handleInputChange}
+                    disabled={formData.urgency === 'Critical'}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-75 disabled:cursor-not-allowed"
+                  >
+                    <option value="Normal">Normal</option>
+                    <option value="High">High</option>
+                    <option value="Critical">Critical (Emergency)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Search Radius (1-10 km)</label>
+                  <input
+                    type="number"
+                    name="radius"
+                    value={formData.radius}
+                    onChange={handleInputChange}
+                    min="1"
+                    max="10"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    required
+                  />
+                </div>
               </div>
+              {formData.urgency === 'Critical' && (
+                <p className="text-[10px] text-red-400 mt-1 font-medium">Locked to Critical for Emergency Request</p>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Hospital / Clinic Name</label>

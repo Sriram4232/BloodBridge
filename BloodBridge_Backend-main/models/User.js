@@ -35,6 +35,54 @@ const userSchema = new mongoose.Schema({
       required: true
     }
   },
+  cityName: {
+    type: String
+  },
+  rewardPoints: {
+    type: Number,
+    default: 0
+  },
+  donationsCount: {
+    type: Number,
+    default: 0
+  },
+  trustScore: {
+    type: Number,
+    default: 100
+  },
+  badge: {
+    type: String,
+    enum: ['none', 'bronze', 'silver', 'gold'],
+    default: 'none'
+  },
+  isEmergencyHero: {
+    type: Boolean,
+    default: false
+  },
+  isFrozen: {
+    type: Boolean,
+    default: false
+  },
+  isSuspended: {
+    type: Boolean,
+    default: false
+  },
+  coolingPeriodEnd: {
+    type: Date,
+    default: null
+  },
+  verificationDocument: {
+    type: String,
+    default: null
+  },
+  hasHealthIssues: {
+    type: Boolean,
+    default: false
+  },
+  healthIssuesDetails: {
+    type: String,
+    default: ""
+  },
   lastUpdated: {
     type: Date,
     default: Date.now

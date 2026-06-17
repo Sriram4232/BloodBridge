@@ -108,9 +108,10 @@ const generateToken = (id, role) => {
   });
 };
 
+
 const registerUser = async (req, res) => {
   try {
-    const { name, email, password, bloodType, role, location } = req.body;
+    const { name, email, password, bloodType, role, location, cityName } = req.body;
 
     const userExists = await User.findOne({ email });
 
@@ -147,6 +148,7 @@ const registerUser = async (req, res) => {
       bloodType,
       role,
       location: userLocation,
+      cityName: cityName || 'Unknown',
       lastUpdated: Date.now()
     });
 
@@ -174,6 +176,16 @@ const registerUser = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        cityName: user.cityName,
+        location: user.location,
+        bloodType: user.bloodType,
+        rewardPoints: user.rewardPoints,
+        donationsCount: user.donationsCount,
+        trustScore: user.trustScore,
+        badge: user.badge,
+        isEmergencyHero: user.isEmergencyHero,
+        isFrozen: user.isFrozen,
+        coolingPeriodEnd: user.coolingPeriodEnd,
         token: generateToken(user.id, user.role)
       });
     } else {
@@ -191,6 +203,10 @@ const loginUser = async (req, res) => {
     const user = await User.findOne({ email });
 
     if (user && (await bcrypt.compare(password, user.password))) {
+      if (user.isSuspended) {
+        return res.status(403).json({ message: 'Access Denied: Your account is suspended due to low trust score or suspicious activity.' });
+      }
+
       // Normalize and update location on login if provided
       let userLocation;
       if (location && typeof location === 'object') {
@@ -218,6 +234,16 @@ const loginUser = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        cityName: user.cityName,
+        location: user.location,
+        bloodType: user.bloodType,
+        rewardPoints: user.rewardPoints,
+        donationsCount: user.donationsCount,
+        trustScore: user.trustScore,
+        badge: user.badge,
+        isEmergencyHero: user.isEmergencyHero,
+        isFrozen: user.isFrozen,
+        coolingPeriodEnd: user.coolingPeriodEnd,
         token: generateToken(user.id, user.role)
       });
     } else {

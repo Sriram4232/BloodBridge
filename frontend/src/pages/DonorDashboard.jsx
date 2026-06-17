@@ -3,10 +3,104 @@ import { useAuth, API_URL } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 
 function DonorDashboard() {
-  const { user } = useAuth();
+  const { user, setUser, refreshUser } = useAuth();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Alerts states
+  const [successMsg, setSuccessMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Redeeming state
+  const [redeemSuccess, setRedeemSuccess] = useState('');
+  const [redeemError, setRedeemError] = useState('');
+  const [voucher, setVoucher] = useState('');
+
+  // Certificate Modal State
+  const [isCertOpen, setIsCertOpen] = useState(false);
+
+  // Health Profile Personalization & Document upload states
+  const [hasHealthIssues, setHasHealthIssues] = useState(user?.hasHealthIssues || false);
+  const [healthIssuesDetails, setHealthIssuesDetails] = useState(user?.healthIssuesDetails || '');
+  const [isUploading, setIsUploading] = useState(false);
+  const [profileSuccess, setProfileSuccess] = useState('');
+  const [profileError, setProfileError] = useState('');
+
+  // Sync state when user profile changes
+  useEffect(() => {
+    if (user) {
+      setHasHealthIssues(user.hasHealthIssues || false);
+      setHealthIssuesDetails(user.healthIssuesDetails || '');
+    }
+  }, [user]);
+
+  const handleSaveHealthProfile = async () => {
+    setProfileSuccess('');
+    setProfileError('');
+    try {
+      const response = await fetch(`${API_URL}/api/users/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user?.token}`
+        },
+        body: JSON.stringify({
+          hasHealthIssues,
+          healthIssuesDetails
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to update health personalization.');
+      }
+      setProfileSuccess('Health personalization updated successfully.');
+      if (refreshUser) {
+        await refreshUser();
+      }
+    } catch (err) {
+      setProfileError(err.message);
+    }
+  };
+
+  const handleDocumentUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setProfileSuccess('');
+    setProfileError('');
+    setIsUploading(true);
+
+    // Simulate file upload progress
+    setTimeout(async () => {
+      try {
+        const mockFilename = `Aadhar_${user?.name.replace(/\s+/g, '_')}_Verified.pdf`;
+        const response = await fetch(`${API_URL}/api/users/profile`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${user?.token}`
+          },
+          body: JSON.stringify({
+            verificationDocument: mockFilename
+          })
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.message || 'Failed to submit verification document.');
+        }
+        setProfileSuccess('Document uploaded and account verified/unfrozen successfully!');
+        if (refreshUser) {
+          await refreshUser();
+        }
+      } catch (err) {
+        setProfileError(err.message);
+      } finally {
+        setIsUploading(false);
+      }
+    }, 1500);
+  };
+
 
   const fetchRequests = async () => {
     setLoading(true);
@@ -26,10 +120,75 @@ function DonorDashboard() {
 
   useEffect(() => {
     fetchRequests();
+    if (refreshUser) {
+      refreshUser();
+    }
   }, []);
 
+  const handleScheduleDonation = async (reqId) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      const response = await fetch(`${API_URL}/api/requests/${reqId}/donate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user?.token}`
+        }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to schedule donation.');
+      }
+      setSuccessMsg('Donation scheduled successfully! Please coordinate details with the hospital.');
+      fetchRequests();
+      if (refreshUser) {
+        refreshUser();
+      }
+    } catch (err) {
+      setErrorMsg(err.message);
+    }
+  };
+
+  const handleRedeem = async (privilegeType) => {
+    setRedeemError('');
+    setRedeemSuccess('');
+    setVoucher('');
+    try {
+      const response = await fetch(`${API_URL}/api/users/redeem`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user?.token}`
+        },
+        body: JSON.stringify({ privilegeType })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to redeem.');
+      }
+      setRedeemSuccess(data.message);
+      setVoucher(data.voucherCode);
+
+      // Update context and local storage
+      const updatedUser = { ...user, rewardPoints: data.newPointsBalance };
+      localStorage.setItem('bloodbridge_user', JSON.stringify(updatedUser));
+      setUser(updatedUser);
+    } catch (err) {
+      setRedeemError(err.message);
+    }
+  };
+
+  const getRemainingCoolingDays = () => {
+    if (!user?.coolingPeriodEnd) return 0;
+    const end = new Date(user.coolingPeriodEnd);
+    const diff = end - new Date();
+    return diff > 0 ? Math.ceil(diff / (24 * 60 * 60 * 1000)) : 0;
+  };
+
+  const coolingDays = getRemainingCoolingDays();
+
   // Medical Blood Compatibility Check
-  // checkCompatibility(donor, recipient)
   const checkCompatibility = (donor, recipient) => {
     if (!donor || !recipient) return false;
     const compatibilityMap = {
@@ -45,7 +204,6 @@ function DonorDashboard() {
     return compatibilityMap[donor]?.includes(recipient) || false;
   };
 
-  // Filter requests that are Pending
   const pendingRequests = requests.filter(r => r.status === 'Pending');
 
   // Filter requests compatible with donor's blood type
@@ -53,54 +211,131 @@ function DonorDashboard() {
     checkCompatibility(user?.bloodType, req.bloodTypeRequired)
   );
 
-  // Filter critical/emergency requests compatible with donor's blood type
   const criticalCompatible = compatibleRequests.filter(req => req.urgency === 'Critical');
 
-  // Other active requests (not directly compatible or different blood types)
   const otherRequests = pendingRequests.filter(req => 
     !checkCompatibility(user?.bloodType, req.bloodTypeRequired)
   );
+
+  const getBadgeIcon = (badge) => {
+    switch (badge?.toLowerCase()) {
+      case 'gold':
+        return '🥇 Gold Donor';
+      case 'silver':
+        return '🥈 Silver Donor';
+      case 'bronze':
+        return '🥉 Bronze Donor';
+      default:
+        return '🎗️ Volunteer';
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 pt-28 pb-16 px-4 md:px-8">
       <div className="max-w-7xl mx-auto">
         
+        {/* Status Alerts */}
+        {successMsg && (
+          <div className="mb-6 p-4 bg-emerald-500/20 border border-emerald-500/50 rounded-2xl text-emerald-200 text-sm flex items-center gap-2">
+            <span>✅ {successMsg}</span>
+          </div>
+        )}
+        {errorMsg && (
+          <div className="mb-6 p-4 bg-red-500/20 border border-red-500/50 rounded-2xl text-red-200 text-sm flex items-center gap-2">
+            <span>⚠️ {errorMsg}</span>
+          </div>
+        )}
+
+        {/* User Suspended or Frozen Warn */}
+        {user?.isFrozen && (
+          <div className="mb-6 p-4 bg-amber-500/20 border border-amber-500/50 rounded-2xl text-amber-200 text-sm">
+            🔒 <strong>Account Frozen:</strong> Your trust score is low ({user?.trustScore}/100). Account is restricted until verified documentation is submitted.
+          </div>
+        )}
+
+        {user?.hasHealthIssues && (
+          <div className="mb-6 p-4 bg-rose-500/20 border border-rose-500/50 rounded-2xl text-rose-200 text-sm">
+            🛡️ <strong>Insurance Account Mode:</strong> Since you registered chronic health conditions, your account is configured as an <strong>insurance/request-only</strong> account. You cannot volunteer for donations.
+          </div>
+        )}
+
+        {coolingDays > 0 && (
+          <div className="mb-6 p-4 bg-blue-500/20 border border-blue-500/50 rounded-2xl text-blue-200 text-sm">
+            ❄️ <strong>Donation Cooling Period:</strong> A person cannot donate frequently. Your account is frozen for <strong>{coolingDays} more day(s)</strong>. Thank you for your recent donation!
+          </div>
+        )}
+
         {/* Welcome Section */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-10 bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-md">
-          <div>
-            <span className="px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/20 text-xs font-bold rounded-full uppercase tracking-wider">
-              Donor Portal
-            </span>
-            <h1 className="text-3xl font-black text-slate-100 mt-2">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 mb-10 bg-white/5 border border-white/10 rounded-2xl p-6 backdrop-blur-md">
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="px-3 py-1 bg-red-500/10 text-red-400 border border-red-500/20 text-xs font-bold rounded-full uppercase tracking-wider">
+                Donor Portal
+              </span>
+              <span className="px-3 py-1 bg-amber-400/10 text-amber-400 border border-amber-400/20 text-xs font-bold rounded-full uppercase tracking-wider">
+                {getBadgeIcon(user?.badge)}
+              </span>
+              {user?.isEmergencyHero && (
+                <span className="px-3 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-xs font-bold rounded-full uppercase tracking-wider animate-pulse">
+                  🚨 Emergency Hero
+                </span>
+              )}
+            </div>
+            
+            <h1 className="text-3xl font-black text-slate-100">
               Welcome back, {user?.name || 'Donor'}!
             </h1>
-            <p className="text-slate-400 text-sm mt-1">
-              Your registered blood type is <strong className="text-red-500 font-extrabold">{user?.bloodType || 'O+'}</strong>, located in <strong>{user?.location || 'Unknown'}</strong>.
+            
+            <p className="text-slate-400 text-sm">
+              Your registered blood type is <strong className="text-red-500 font-extrabold">{user?.bloodType || 'O+'}</strong>, located in <strong>{user?.cityName || 'Unknown'}</strong>.
             </p>
+
+            {/* Trust Score Meter */}
+            <div className="pt-2 max-w-xs">
+              <div className="flex justify-between text-xs text-slate-450 font-bold mb-1">
+                <span>Trust Score</span>
+                <span className={user?.trustScore >= 75 ? 'text-emerald-400' : 'text-amber-400'}>{user?.trustScore || 100}%</span>
+              </div>
+              <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full ${user?.trustScore >= 75 ? 'bg-emerald-500' : user?.trustScore >= 40 ? 'bg-amber-500' : 'bg-red-500'}`} 
+                  style={{ width: `${user?.trustScore || 100}%` }}
+                ></div>
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4 bg-slate-950/60 border border-slate-800 p-4 rounded-xl">
-            <div className="relative flex items-center justify-center h-14 w-14 rounded-full bg-red-500/10 border-2 border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.2)] font-black text-2xl text-red-500">
-              {user?.bloodType || 'O+'}
+          <div className="flex gap-4">
+            <div className="flex items-center gap-4 bg-slate-950/60 border border-slate-800 p-4 rounded-xl">
+              <div className="relative flex items-center justify-center h-14 w-14 rounded-full bg-red-500/10 border-2 border-red-500/50 font-black text-2xl text-red-500">
+                {user?.bloodType || 'O+'}
+              </div>
+              <div>
+                <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">Balance</p>
+                <p className="text-lg font-black text-red-400">{user?.rewardPoints || 0} Points</p>
+              </div>
             </div>
-            <div>
-              <p className="text-xs text-slate-400 uppercase font-bold tracking-wider">Compatibility Status</p>
-              <p className="text-sm font-semibold text-emerald-400">Ready to Donate</p>
-            </div>
+
+            {user?.donationsCount > 0 && (
+              <button 
+                onClick={() => setIsCertOpen(true)}
+                className="py-3 px-5 text-sm font-semibold rounded-xl text-white bg-slate-850 hover:bg-slate-750 border border-slate-700 transition"
+              >
+                📜 Certificate
+              </button>
+            )}
           </div>
         </div>
 
         {/* Dashboard Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md relative overflow-hidden">
-            <div className="absolute right-4 top-4 text-emerald-500/10 text-5xl">❤️</div>
+          <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Compatible Requests</p>
             <p className="text-3xl font-black text-emerald-400">{compatibleRequests.length}</p>
             <p className="text-xs text-slate-500 mt-2">Active patients you can save today</p>
           </div>
 
-          <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md relative overflow-hidden">
-            <div className="absolute right-4 top-4 text-red-500/10 text-5xl">🚨</div>
+          <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Critical Matches</p>
             <p className="text-3xl font-black text-rose-500 flex items-center gap-2">
               {criticalCompatible.length}
@@ -111,43 +346,19 @@ function DonorDashboard() {
             <p className="text-xs text-slate-500 mt-2">Emergency alerts matching your type</p>
           </div>
 
-          <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md relative overflow-hidden">
-            <div className="absolute right-4 top-4 text-slate-500/10 text-5xl">🩸</div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Total Active Demand</p>
-            <p className="text-3xl font-black text-slate-300">{pendingRequests.length}</p>
-            <p className="text-xs text-slate-500 mt-2">Requests across all blood types</p>
+          <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Total Donations</p>
+            <p className="text-3xl font-black text-slate-350">{user?.donationsCount || 0}</p>
+            <p className="text-xs text-slate-500 mt-2">Your historical lives-saved count</p>
           </div>
         </div>
 
-        {/* Call to Action for critical matches */}
-        {criticalCompatible.length > 0 && (
-          <div className="mb-10 p-6 bg-gradient-to-r from-red-950/60 to-slate-900/60 border border-red-500/30 rounded-2xl backdrop-blur-md flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-[0_0_25px_rgba(239,68,68,0.1)]">
-            <div className="flex items-center gap-3">
-              <span className="flex h-3 w-3 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-              </span>
-              <div>
-                <h2 className="text-lg font-bold text-red-400">Emergency Match Alert!</h2>
-                <p className="text-slate-300 text-sm mt-0.5">
-                  There are {criticalCompatible.length} critical emergency requests looking for blood type {user?.bloodType}. Your response could save a life right now!
-                </p>
-              </div>
-            </div>
-            <a href="#urgent-matches" className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold shadow-lg transition-all hover:scale-105">
-              Respond Now
-            </a>
-          </div>
-        )}
-
-        {/* Main Sections layout */}
+        {/* Main Sections Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
-          {/* Column 1 & 2: Matches list */}
+          {/* Matches List */}
           <div className="lg:col-span-2 space-y-8">
-            
-            {/* Direct Matches Section */}
-            <div id="urgent-matches">
+            <div>
               <h2 className="text-2xl font-black text-slate-100 mb-6 flex items-center gap-2">
                 <span className="text-red-500">🩸</span> Compatible Matches for You
               </h2>
@@ -160,8 +371,6 @@ function DonorDashboard() {
                   </svg>
                   <p className="text-xs text-slate-400">Finding compatible requests...</p>
                 </div>
-              ) : error ? (
-                <p className="text-red-400 text-sm p-4 bg-red-500/10 rounded-xl">{error}</p>
               ) : compatibleRequests.length === 0 ? (
                 <div className="text-center py-12 bg-white/5 border border-white/15 rounded-2xl p-6">
                   <p className="text-slate-400 text-base font-semibold mb-1">No Matching Demands</p>
@@ -174,6 +383,9 @@ function DonorDashboard() {
                   {compatibleRequests.map(req => {
                     const isCritical = req.urgency === 'Critical';
                     const isHigh = req.urgency === 'High';
+                    const mapsLink = req.location?.coordinates
+                      ? `https://www.google.com/maps/search/?api=1&query=${req.location.coordinates[1]},${req.location.coordinates[0]}`
+                      : null;
                     
                     return (
                       <div 
@@ -195,7 +407,7 @@ function DonorDashboard() {
                             {req.urgency} Urgency
                           </span>
                           <span className="text-xs text-slate-400">
-                            Needs {req.unitsRequired} {req.unitsRequired > 1 ? 'units' : 'unit'}
+                            Needs {req.unitsRequired} U
                           </span>
                         </div>
 
@@ -216,22 +428,34 @@ function DonorDashboard() {
                           <p className="flex items-center gap-1.5">
                             <span className="text-slate-500 font-medium">Location:</span> {req.hospitalLocation}
                           </p>
+                          {mapsLink && (
+                            <p className="flex items-center gap-1.5">
+                              <span className="text-slate-500 font-medium">Map Directions:</span>
+                              <a href={mapsLink} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
+                                📍 View Location on Google Maps
+                              </a>
+                            </p>
+                          )}
                           <p className="flex items-center gap-1.5">
                             <span className="text-slate-500 font-medium">Contact:</span> 
                             <a href={`tel:${req.contactNumber}`} className="text-red-400 hover:underline">{req.contactNumber}</a>
                           </p>
                         </div>
 
-                        <a 
-                          href={`tel:${req.contactNumber}`}
-                          className={`block w-full py-2 rounded-xl text-xs font-semibold text-center transition ${
-                            isCritical 
-                              ? 'bg-red-600 hover:bg-red-700 text-white' 
-                              : 'bg-white/10 hover:bg-white/15 text-slate-200'
-                          }`}
-                        >
-                          Donate & Save Life
-                        </a>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => handleScheduleDonation(req._id)}
+                            disabled={coolingDays > 0 || user?.isFrozen || user?.hasHealthIssues}
+                            title={user?.hasHealthIssues ? "Disabled: Registered health conditions prevent blood donation" : ""}
+                            className={`w-full py-2.5 rounded-xl text-xs font-semibold text-center transition ${
+                              isCritical 
+                                ? 'bg-red-600 hover:bg-red-700 text-white' 
+                                : 'bg-white/10 hover:bg-white/15 text-slate-200'
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
+                          >
+                            Schedule Donation
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -239,7 +463,7 @@ function DonorDashboard() {
               )}
             </div>
 
-            {/* Other Requests Section */}
+            {/* Other Active Demands */}
             <div>
               <h2 className="text-xl font-bold text-slate-200 mb-4">
                 Other Active Demands
@@ -271,36 +495,181 @@ function DonorDashboard() {
                 </div>
               )}
             </div>
-
           </div>
 
-          {/* Column 3: Sidebar Details */}
+          {/* Sidebar Panels: Redeem Privileges */}
           <div className="space-y-6">
-            
-            {/* Donor Quick Tips */}
-            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md">
-              <h3 className="text-lg font-bold text-slate-200 mb-4">Donor Guidelines</h3>
-              <ul className="space-y-3.5 text-xs text-slate-400">
-                <li className="flex items-start gap-2.5">
-                  <span className="text-emerald-500 font-bold mt-0.5">✓</span>
-                  <span>Ensure you are well-hydrated and have had a healthy meal before donating.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <span className="text-emerald-500 font-bold mt-0.5">✓</span>
-                  <span>Carry a valid photo ID card (Driver's License, Govt ID) to the hospital.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <span className="text-emerald-500 font-bold mt-0.5">✓</span>
-                  <span>Keep a gap of at least 8 to 12 weeks between successive blood donations.</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <span className="text-emerald-500 font-bold mt-0.5">✓</span>
-                  <span>Avoid strenuous physical activity or heavy lifting for the rest of the day after donating.</span>
-                </li>
-              </ul>
+            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md space-y-4">
+              <h3 className="text-lg font-bold text-slate-200">Redeem Medical Privileges</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Use your hard-earned points to unlock discounts and consultations with partner healthcare networks.
+              </p>
+
+              {redeemSuccess && (
+                <div className="p-3 bg-emerald-500/20 border border-emerald-500/50 rounded-xl text-emerald-300 text-xs">
+                  🎉 {redeemSuccess}
+                  {voucher && (
+                    <div className="mt-2 font-mono font-bold bg-black/40 p-2 rounded text-center text-sm border border-emerald-500/30">
+                      {voucher}
+                    </div>
+                  )}
+                </div>
+              )}
+              {redeemError && (
+                <div className="p-3 bg-red-500/20 border border-red-500/50 rounded-xl text-red-300 text-xs">
+                  ⚠️ {redeemError}
+                </div>
+              )}
+
+              <div className="space-y-3 pt-2">
+                <div className="flex justify-between items-center bg-slate-950/40 p-3 rounded-xl border border-slate-800">
+                  <div>
+                    <h4 className="text-xs font-bold">Free Digital Doctor Consultation</h4>
+                    <p className="text-[9px] text-slate-500">Virtual medical checkup voucher</p>
+                  </div>
+                  <button 
+                    onClick={() => handleRedeem('consultation')}
+                    disabled={user?.rewardPoints < 15}
+                    className="py-1.5 px-3 bg-red-500/20 hover:bg-red-500/35 border border-red-500/30 text-red-300 rounded-lg text-[10px] font-bold transition disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    15 pts
+                  </button>
+                </div>
+
+                <div className="flex justify-between items-center bg-slate-950/40 p-3 rounded-xl border border-slate-800">
+                  <div>
+                    <h4 className="text-xs font-bold">50% Off Diagnostic Blood Test</h4>
+                    <p className="text-[9px] text-slate-500">Free pathology tests voucher</p>
+                  </div>
+                  <button 
+                    onClick={() => handleRedeem('test')}
+                    disabled={user?.rewardPoints < 30}
+                    className="py-1.5 px-3 bg-red-500/20 hover:bg-red-500/35 border border-red-500/30 text-red-300 rounded-lg text-[10px] font-bold transition disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    30 pts
+                  </button>
+                </div>
+
+                <div className="flex justify-between items-center bg-slate-950/40 p-3 rounded-xl border border-slate-800">
+                  <div>
+                    <h4 className="text-xs font-bold">Priority Hospital Booking</h4>
+                    <p className="text-[9px] text-slate-500">Booking privileges for non-emergencies</p>
+                  </div>
+                  <button 
+                    onClick={() => handleRedeem('booking')}
+                    disabled={user?.rewardPoints < 50}
+                    className="py-1.5 px-3 bg-red-500/20 hover:bg-red-500/35 border border-red-500/30 text-red-300 rounded-lg text-[10px] font-bold transition disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    50 pts
+                  </button>
+                </div>
+              </div>
             </div>
 
-            {/* General Requests Navigation */}
+            {/* Profile & Health Verification Card */}
+            <div className="p-6 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md space-y-4">
+              <h3 className="text-lg font-bold text-slate-200">Profile & Verification</h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Configure chronic health conditions or upload medical documents to verify your account status.
+              </p>
+
+              {profileSuccess && (
+                <div className="p-3 bg-emerald-500/20 border border-emerald-500/50 rounded-xl text-emerald-300 text-xs">
+                  ✅ {profileSuccess}
+                </div>
+              )}
+              {profileError && (
+                <div className="p-3 bg-red-500/20 border border-red-500/50 rounded-xl text-red-300 text-xs">
+                  ⚠️ {profileError}
+                </div>
+              )}
+
+              {/* Health Personalization form */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-start gap-2 bg-slate-950/40 p-3 rounded-xl border border-slate-800">
+                  <input 
+                    type="checkbox"
+                    id="hasHealthIssues"
+                    checked={hasHealthIssues}
+                    onChange={(e) => {
+                      setHasHealthIssues(e.target.checked);
+                      if (!e.target.checked) setHealthIssuesDetails('');
+                    }}
+                    className="mt-1 rounded border-slate-700 bg-slate-950 text-red-500 focus:ring-red-500 focus:ring-offset-slate-900"
+                  />
+                  <label htmlFor="hasHealthIssues" className="text-xs font-semibold text-slate-350 cursor-pointer select-none">
+                    Chronic health conditions (e.g. Diabetes, HIV/AIDS, Sugar, or other issues preventing donation)
+                  </label>
+                </div>
+
+                {hasHealthIssues && (
+                  <div className="space-y-1.5 animate-fadeIn">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Condition Details</label>
+                    <textarea
+                      value={healthIssuesDetails}
+                      onChange={(e) => setHealthIssuesDetails(e.target.value)}
+                      placeholder="Please specify (e.g., Type 2 Diabetes, High Sugar level)"
+                      className="w-full h-16 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none placeholder-slate-600 focus:border-red-500/30"
+                    />
+                    <p className="text-[10px] text-rose-400 font-medium italic leading-relaxed">
+                      * Note: You will serve as insurance/request-only for future blood requests and won't be listed as a donor.
+                    </p>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleSaveHealthProfile}
+                  className="w-full py-2.5 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-300 hover:text-red-200 rounded-xl text-xs font-bold transition shadow-sm"
+                >
+                  Save Personalization
+                </button>
+              </div>
+
+              {/* Verification Document Upload */}
+              <div className="border-t border-slate-800/80 pt-4 space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Account Verification</h4>
+                {user?.verificationDocument ? (
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-xs flex flex-col gap-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <span>🛡️ Verification Document Attached:</span>
+                    </div>
+                    <span className="font-mono text-[10px] text-slate-400 break-all">{user.verificationDocument}</span>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-[10px] text-slate-500 leading-normal">
+                      Upload an Aadhar copy or Medical Certificate to verify status and resolve account freezes.
+                    </p>
+                    
+                    <label className="relative flex flex-col items-center justify-center p-4 border border-dashed border-slate-700 hover:border-slate-500 rounded-xl bg-slate-950/40 cursor-pointer transition">
+                      {isUploading ? (
+                        <div className="flex flex-col items-center gap-1.5 py-1">
+                          <svg className="animate-spin h-5 w-5 text-red-500" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          <span className="text-[10px] font-semibold text-slate-400">Uploading certificate...</span>
+                        </div>
+                      ) : (
+                        <div className="text-center">
+                          <span className="text-lg block mb-1">📤</span>
+                          <span className="text-[11px] font-bold text-red-400 hover:text-red-300">Upload Aadhar / Medical Certificate</span>
+                          <span className="text-[9px] text-slate-500 block mt-0.5">PDF or Image (Max 5MB)</span>
+                        </div>
+                      )}
+                      <input 
+                        type="file" 
+                        accept=".pdf, image/*"
+                        onChange={handleDocumentUpload}
+                        disabled={isUploading}
+                        className="hidden" 
+                      />
+                    </label>
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="p-6 rounded-2xl bg-gradient-to-br from-red-950/20 to-slate-900/40 border border-white/10 backdrop-blur-md text-center">
               <h3 className="font-bold text-slate-200 mb-2">Need to request blood?</h3>
               <p className="text-xs text-slate-400 mb-4">
@@ -313,12 +682,46 @@ function DonorDashboard() {
                 Go to Requests Dashboard
               </Link>
             </div>
-
           </div>
 
         </div>
 
       </div>
+
+      {/* Recognition Certificate Modal */}
+      {isCertOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-800 p-8 rounded-2xl max-w-2xl w-full text-center relative shadow-2xl">
+            <button onClick={() => setIsCertOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white text-xl">✕</button>
+            <div className="border-4 border-double border-red-500/50 p-6 rounded-xl bg-slate-950/80 my-4 text-slate-100">
+              <h2 className="text-3xl font-serif text-red-500 mb-1">CERTIFICATE OF RECOGNITION</h2>
+              <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-6">BloodBridge Lifesaver Network</p>
+              
+              <p className="text-sm italic text-slate-400">This certificate is proudly presented to</p>
+              <p className="text-3xl font-serif font-bold text-red-400 my-4 border-b border-slate-800 pb-2">{user?.name}</p>
+              
+              <p className="text-xs text-slate-350 max-w-md mx-auto leading-relaxed my-4">
+                In grateful recognition of your voluntary contributions as a verified donor, accumulating <strong>{user?.rewardPoints || 0} Honor Points</strong> and helping save lives in emergencies.
+              </p>
+
+              <div className="grid grid-cols-2 gap-4 mt-8 pt-6 border-t border-slate-800 text-xs">
+                <div>
+                  <p className="font-bold text-slate-350">{user?.badge?.toUpperCase() === 'NONE' ? 'BRONZE' : user?.badge?.toUpperCase()} DONOR</p>
+                  <p className="text-[10px] text-slate-500">Badge Rank</p>
+                </div>
+                <div>
+                  <p className="font-bold text-slate-350">{new Date().toLocaleDateString()}</p>
+                  <p className="text-[10px] text-slate-500">Date Issued</p>
+                </div>
+              </div>
+            </div>
+            <button onClick={() => window.print()} className="mt-4 py-2.5 px-6 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-650 hover:to-red-700 text-white rounded-xl text-xs font-semibold shadow-md transition">
+              Print / Save Certificate
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

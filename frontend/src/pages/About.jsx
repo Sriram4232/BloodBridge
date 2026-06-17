@@ -1,6 +1,30 @@
+import { useState, useEffect } from 'react';
+import { API_URL } from '../context/AuthContext';
 import aboutBg from '../assets/about.mp4';
 
 function About() {
+  const [stats, setStats] = useState({
+    totalDonations: 14,
+    totalDonors: 42,
+    activeRequests: 5,
+    criticalResolved: 8
+  });
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/users/stats`);
+        if (res.ok) {
+          const data = await res.json();
+          setStats(data);
+        }
+      } catch (err) {
+        console.error('Failed to load stats on About page:', err);
+      }
+    };
+    fetchStats();
+  }, []);
+
   return (
     <div className="relative min-h-screen text-slate-200 flex flex-col items-center pt-28 pb-16 px-4 md:px-8">
       {/* Background Video */}
@@ -28,6 +52,26 @@ function About() {
           <p className="text-slate-300 text-base md:text-lg leading-relaxed max-w-2xl mx-auto">
             BloodBridge is an integrated Blood Health & Supply Intelligence Platform designed to transform India's blood healthcare ecosystem from a fragmented, reactive system into a connected, intelligent, and life-saving network.
           </p>
+        </div>
+
+        {/* Live Platform Stats */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+          <div className="p-4 bg-white/5 border border-white/10 rounded-2xl shadow-md backdrop-blur-md transition hover:border-red-500/30">
+            <p className="text-3xl font-black text-red-500">{stats.totalDonations}</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold mt-1">Total Donations</p>
+          </div>
+          <div className="p-4 bg-white/5 border border-white/10 rounded-2xl shadow-md backdrop-blur-md transition hover:border-emerald-500/30">
+            <p className="text-3xl font-black text-emerald-400">{stats.totalDonors}</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold mt-1">Registered Donors</p>
+          </div>
+          <div className="p-4 bg-white/5 border border-white/10 rounded-2xl shadow-md backdrop-blur-md transition hover:border-amber-500/30">
+            <p className="text-3xl font-black text-amber-500">{stats.activeRequests}</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold mt-1">Active Demands</p>
+          </div>
+          <div className="p-4 bg-white/5 border border-white/10 rounded-2xl shadow-md backdrop-blur-md transition hover:border-rose-500/30">
+            <p className="text-3xl font-black text-rose-500">{stats.criticalResolved}</p>
+            <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold mt-1">Critical Saved</p>
+          </div>
         </div>
 
         {/* Mission statement callout */}

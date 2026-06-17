@@ -10,6 +10,10 @@ const donationSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'BloodRequest'
   },
+  requester: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
   bloodType: {
     type: String,
     required: true
@@ -25,8 +29,8 @@ const donationSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['Scheduled', 'Completed', 'Cancelled'],
-    default: 'Completed'
+    enum: ['Scheduled', 'Completed', 'Cancelled', 'Fake'],
+    default: 'Scheduled'
   }
 }, { timestamps: true });
 

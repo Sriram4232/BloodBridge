@@ -35,6 +35,25 @@ function Login() {
     setSuccess('');
   };
 
+  const getCoordinates = () => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve([82.2198, 16.7324]); // Default fallback (Uppalaguptam)
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve([position.coords.longitude, position.coords.latitude]);
+        },
+        (error) => {
+          console.warn('Geolocation error or permission denied:', error);
+          resolve([82.2198, 16.7324]); // Fallback
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -48,8 +67,19 @@ function Login() {
         setLocalLoading(false);
         return;
       }
+
+      const coords = await getCoordinates();
+      const signupPayload = {
+        name: formData.name.trim(),
+        email: formData.email.trim(),
+        password: formData.password.trim(),
+        bloodType: formData.bloodType,
+        role: formData.role,
+        cityName: formData.location.trim(),
+        location: coords
+      };
       
-      const res = await register(formData);
+      const res = await register(signupPayload);
       if (res.success) {
         setSuccess('Registration successful! Connecting you to BloodBridge...');
         setTimeout(() => {
@@ -66,7 +96,17 @@ function Login() {
         return;
       }
 
-      const res = await login(formData.email, formData.password);
+      let coords = null;
+      try {
+        coords = await Promise.race([
+          getCoordinates(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
+        ]).catch(() => null);
+      } catch (err) {
+        // Ignored
+      }
+
+      const res = await login(formData.email.trim(), formData.password.trim(), coords);
       if (res.success) {
         setSuccess('Login successful! Redirecting to dashboard...');
         setTimeout(() => {

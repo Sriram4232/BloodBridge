@@ -6,6 +6,27 @@ import { API_URL } from '../context/AuthContext';
 function Home() {
   const [criticalRequests, setCriticalRequests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({
+    totalDonations: 14,
+    totalDonors: 42,
+    activeRequests: 5,
+    criticalResolved: 8
+  });
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/users/stats`);
+        if (response.ok) {
+          const data = await response.json();
+          setStats(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch stats:', err);
+      }
+    };
+    fetchStats();
+  }, []);
 
   useEffect(() => {
     const fetchCriticalRequests = async () => {
@@ -70,6 +91,26 @@ function Home() {
             >
               Donate / Join Network
             </Link>
+          </div>
+          
+          {/* Stats Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-6">
+            <div className="p-3 bg-white/5 border border-white/10 rounded-xl backdrop-blur-md">
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Volunteers Joined</p>
+              <p className="text-xl font-black text-red-400 mt-1">{stats.totalDonors}</p>
+            </div>
+            <div className="p-3 bg-white/5 border border-white/10 rounded-xl backdrop-blur-md">
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Lives Saved</p>
+              <p className="text-xl font-black text-emerald-400 mt-1">{stats.totalDonations}</p>
+            </div>
+            <div className="p-3 bg-white/5 border border-white/10 rounded-xl backdrop-blur-md">
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Active Demands</p>
+              <p className="text-xl font-black text-amber-400 mt-1">{stats.activeRequests}</p>
+            </div>
+            <div className="p-3 bg-white/5 border border-white/10 rounded-xl backdrop-blur-md">
+              <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Emergencies Met</p>
+              <p className="text-xl font-black text-pink-400 mt-1">{stats.criticalResolved}</p>
+            </div>
           </div>
         </div>
 
