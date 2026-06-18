@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const dns = require('dns').promises;
 
 const sendEmail = async (options) => {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
@@ -6,17 +7,29 @@ const sendEmail = async (options) => {
     throw new Error('Email transport is not configured: missing credentials.');
   }
 
+  // Force DNS lookup of smtp.gmail.com to IPv4 to bypass Render's IPv6 ENETUNREACH issues
+  let smtpHost = 'smtp.gmail.com';
+  try {
+    const addresses = await dns.resolve4('smtp.gmail.com');
+    if (addresses && addresses.length > 0) {
+      smtpHost = addresses[0];
+      console.log(`Resolved smtp.gmail.com to IPv4: ${smtpHost}`);
+    }
+  } catch (dnsErr) {
+    console.warn('Failed to resolve smtp.gmail.com to IPv4 using dns.resolve4, falling back to hostname:', dnsErr);
+  }
+
   // Create a transporter
   const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
+    host: smtpHost,
     port: 465,
     secure: true,
-    family: 4, // Force IPv4 to prevent ENETUNREACH on IPv6 resolution in cloud environments
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS,
     },
     tls: {
+      servername: 'smtp.gmail.com', // Crucial for certificate validation when host is an IP
       rejectUnauthorized: false
     }
   });
