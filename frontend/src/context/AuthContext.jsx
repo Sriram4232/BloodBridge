@@ -2,7 +2,7 @@ import { createContext, useState, useContext, useEffect } from 'react';
 
 const AuthContext = createContext();
 
-export const API_URL = import.meta.env.VITE_API_URL || 'https://bloodbridge-ulsa.onrender.com';
+export const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:5000' : 'https://bloodbridge-ulsa.onrender.com');
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {

@@ -4,8 +4,10 @@ const cors = require('cors');
 const connectDB = require('./config/db');
 const { apiLimiter } = require('./middlewares/rateLimit');
 
+const path = require('path');
+
 // Load env vars
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, '.env') });
 
 // Connect to database
 connectDB();

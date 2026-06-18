@@ -12,6 +12,18 @@ function DonorDashboard() {
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
+  // Submitted requests & Verifications states
+  const [scheduledDonations, setScheduledDonations] = useState([]);
+  const [isVerifyModalOpen, setIsVerifyModalOpen] = useState(false);
+  const [selectedDonation, setSelectedDonation] = useState(null);
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
+  const [verifySuccess, setVerifySuccess] = useState('');
+  const [verifyData, setVerifyData] = useState({
+    unitsDonated: 1,
+    feedback: ''
+  });
+
   // Redeeming state
   const [redeemSuccess, setRedeemSuccess] = useState('');
   const [redeemError, setRedeemError] = useState('');
@@ -111,10 +123,135 @@ function DonorDashboard() {
       }
       const data = await response.json();
       setRequests(data);
+
+      // Filter own requests submitted by this user
+      const ownList = data.filter(req => 
+        req.requester && (req.requester._id === user?._id || req.requester === user?._id)
+      );
+      // Fetch all scheduled donations for pending requests
+      await fetchAllScheduledDonations(ownList);
     } catch (err) {
       setError(err.message || 'Error loading data.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAllScheduledDonations = async (ownRequestsList) => {
+    try {
+      const activeOwnList = ownRequestsList.filter(r => r.status === 'Pending' || r.status === 'Fulfilled');
+      const donationsPromises = activeOwnList.map(async (req) => {
+        const res = await fetch(`${API_URL}/api/requests/${req._id}/donations`, {
+          headers: {
+            'Authorization': `Bearer ${user?.token}`
+          }
+        });
+        if (res.ok) {
+          return await res.json();
+        }
+        return [];
+      });
+      const results = await Promise.all(donationsPromises);
+      // Flatten and keep only 'Scheduled' status donations
+      const flatDonations = results.flat().filter(d => d.status === 'Scheduled');
+      setScheduledDonations(flatDonations);
+    } catch (err) {
+      console.error('Failed to fetch scheduled donations:', err);
+    }
+  };
+
+  const updateRequestStatus = async (id, newStatus) => {
+    try {
+      const response = await fetch(`${API_URL}/api/requests/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user?.token}`,
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.message || 'Failed to update request.');
+      }
+
+      fetchRequests();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const openVerifyModal = (donation) => {
+    setSelectedDonation(donation);
+    setVerifyData({
+      unitsDonated: donation.unitsDonated || 1,
+      feedback: ''
+    });
+    setVerifyError('');
+    setVerifySuccess('');
+    setIsVerifyModalOpen(true);
+  };
+
+  const handleVerifySubmit = async (e) => {
+    e.preventDefault();
+    setVerifyError('');
+    setVerifySuccess('');
+    setVerifyLoading(true);
+
+    try {
+      const response = await fetch(`${API_URL}/api/requests/verify-donation`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user?.token}`
+        },
+        body: JSON.stringify({
+          donationId: selectedDonation._id,
+          unitsDonated: Number(verifyData.unitsDonated),
+          feedback: verifyData.feedback
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Verification failed.');
+      }
+      setVerifySuccess(data.message || 'Donation verified successfully!');
+      fetchRequests();
+      if (refreshUser) {
+        await refreshUser();
+      }
+      setTimeout(() => {
+        setIsVerifyModalOpen(false);
+      }, 1800);
+    } catch (err) {
+      setVerifyError(err.message);
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
+  const handleReportFake = async (donationId) => {
+    if (!window.confirm('Are you sure you want to report this donation as fake? The donor trust score will be reduced and investigated.')) {
+      return;
+    }
+    try {
+      const response = await fetch(`${API_URL}/api/requests/report-fake`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user?.token}`
+        },
+        body: JSON.stringify({ donationId })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.message || 'Reporting failed.');
+      }
+      alert('Report submitted successfully. The donor trust score has been lowered.');
+      fetchRequests();
+    } catch (err) {
+      alert(err.message);
     }
   };
 
@@ -215,6 +352,10 @@ function DonorDashboard() {
 
   const otherRequests = pendingRequests.filter(req => 
     !checkCompatibility(user?.bloodType, req.bloodTypeRequired)
+  );
+
+  const ownRequests = requests.filter(req => 
+    req.requester && (req.requester._id === user?._id || req.requester === user?._id)
   );
 
   const getBadgeIcon = (badge) => {
@@ -492,7 +633,157 @@ function DonorDashboard() {
                       </div>
                     </div>
                   ))}
+                  {/* SECTION: Scheduled Volunteer Donations */}
+            {scheduledDonations.length > 0 && (
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-md mt-8">
+                <h2 className="text-xl font-bold text-rose-400 mb-6 flex items-center gap-2">
+                  🤝 Pending Donation Verifications
+                </h2>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                        <th className="py-3 px-4">Donor Name</th>
+                        <th className="py-3 px-4">Blood Type</th>
+                        <th className="py-3 px-4">Scheduled Units</th>
+                        <th className="py-3 px-4">Distance</th>
+                        <th className="py-3 px-4">Trust Score</th>
+                        <th className="py-3 px-4">Badge</th>
+                        <th className="py-3 px-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-sm text-slate-350">
+                      {scheduledDonations.map(donation => (
+                        <tr key={donation._id} className="hover:bg-white/2 transition">
+                          <td className="py-4 px-4 font-bold text-slate-200">
+                            {donation.donor?.name || 'Anonymous Donor'}
+                          </td>
+                          <td className="py-4 px-4">
+                            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-red-500/10 border border-red-500/30 font-black text-red-500 text-xs">
+                              {donation.bloodType}
+                            </span>
+                          </td>
+                          <td className="py-4 px-4 text-slate-350">{donation.unitsDonated} Unit(s)</td>
+                          <td className="py-4 px-4 text-slate-350 font-medium">
+                            {donation.distance !== null && donation.distance !== undefined
+                              ? `📍 ${donation.distance} km`
+                              : 'N/A'}
+                          </td>
+                          <td className="py-4 px-4 text-slate-400 font-semibold">{donation.donor?.trustScore || 100}%</td>
+                          <td className="py-4 px-4 uppercase text-[10px] tracking-wider font-bold">
+                            {donation.donor?.badge || 'none'}
+                          </td>
+                          <td className="py-4 px-4 text-right">
+                            <div className="flex justify-end gap-2">
+                              <button 
+                                onClick={() => openVerifyModal(donation)}
+                                className="py-1 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition"
+                              >
+                                Verify Completion
+                              </button>
+                              <button 
+                                onClick={() => handleReportFake(donation._id)}
+                                className="py-1 px-3 bg-red-650 hover:bg-red-750 text-white rounded-lg text-xs font-semibold transition"
+                              >
+                                Report Fake
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
+              </div>
+            )}
+
+            {/* SECTION: Submitted Requests */}
+            {ownRequests.length > 0 && (
+              <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-md mt-8">
+                <h2 className="text-xl font-bold text-slate-200 mb-6 flex items-center gap-2">
+                  📋 Your Submitted Blood Requests
+                </h2>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                        <th className="py-3.5 px-4">Patient Name</th>
+                        <th className="py-3.5 px-4">Blood Type</th>
+                        <th className="py-3.5 px-4">Units</th>
+                        <th className="py-3.5 px-4">Urgency</th>
+                        <th className="py-3.5 px-4">Status</th>
+                        <th className="py-3.5 px-4">Date Created</th>
+                        <th className="py-3.5 px-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-sm text-slate-350">
+                      {ownRequests.map(req => {
+                        const isCritical = req.urgency === 'Critical';
+                        const isHigh = req.urgency === 'High';
+                        
+                        return (
+                          <tr key={req._id} className="hover:bg-white/2 transition duration-150">
+                            <td className="py-4 px-4 font-bold text-slate-200">{req.patientName}</td>
+                            <td className="py-4 px-4">
+                              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-red-500/10 border border-red-500/30 font-black text-red-500 text-xs">
+                                {req.bloodTypeRequired}
+                              </span>
+                            </td>
+                            <td className="py-4 px-4 text-slate-350">{req.unitsRequired} Units</td>
+                            <td className="py-4 px-4">
+                              <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full tracking-wide uppercase ${
+                                isCritical
+                                  ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                  : isHigh
+                                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                  : 'bg-slate-700/30 text-slate-400'
+                              }`}>
+                                {req.urgency}
+                              </span>
+                            </td>
+                            <td className="py-4 px-4">
+                              <span className={`px-2.5 py-0.5 text-[11px] font-semibold rounded-full ${
+                                req.status === 'Pending'
+                                  ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                  : req.status === 'Fulfilled'
+                                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                                  : 'bg-slate-800 text-slate-450 border border-slate-700/50'
+                              }`}>
+                                {req.status}
+                              </span>
+                            </td>
+                            <td className="py-4 px-4 text-slate-500 text-xs">
+                              {new Date(req.createdAt).toLocaleDateString()}
+                            </td>
+                            <td className="py-4 px-4 text-right">
+                              {req.status === 'Pending' ? (
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    onClick={() => updateRequestStatus(req._id, 'Fulfilled')}
+                                    className="py-1 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition"
+                                  >
+                                    Mark Fulfilled
+                                  </button>
+                                  <button
+                                    onClick={() => updateRequestStatus(req._id, 'Closed')}
+                                    className="py-1 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-semibold transition"
+                                  >
+                                    Close
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-xs text-slate-500 italic">No Action Needed</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
               )}
             </div>
           </div>
@@ -718,6 +1009,100 @@ function DonorDashboard() {
             <button onClick={() => window.print()} className="mt-4 py-2.5 px-6 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-650 hover:to-red-700 text-white rounded-xl text-xs font-semibold shadow-md transition">
               Print / Save Certificate
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Verify Donation (Award Points, check Fraud) */}
+      {isVerifyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 overflow-y-auto bg-black/75 backdrop-blur-sm">
+          <div className="relative w-full max-w-lg p-6 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl text-slate-100 max-h-[90vh] overflow-y-auto">
+            <button onClick={() => setIsVerifyModalOpen(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">✕</button>
+
+            <div className="text-center mb-6">
+              <h2 className="text-2xl font-bold flex items-center justify-center gap-2">
+                🛡️ Verify Donation Completion
+              </h2>
+              <p className="text-slate-400 text-xs mt-1">
+                Confirm donor details. Submitting triggers AI collusion and point-farming checks.
+              </p>
+            </div>
+
+            {verifyError && (
+              <div className="mb-4 p-3 bg-red-500/20 border border-red-500/50 rounded-xl text-red-200 text-sm">
+                <span>⚠️ {verifyError}</span>
+              </div>
+            )}
+            
+            {verifySuccess && (
+              <div className="mb-4 p-3 bg-emerald-500/20 border border-emerald-500/50 rounded-xl text-emerald-200 text-sm">
+                <span>✅ {verifySuccess}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleVerifySubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Donor Name</label>
+                <input
+                  type="text"
+                  value={selectedDonation?.donor?.name || ''}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-400 focus:outline-none"
+                  disabled
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Blood Type</label>
+                  <input
+                    type="text"
+                    value={selectedDonation?.bloodType || ''}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-slate-400 focus:outline-none"
+                    disabled
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Units Donated</label>
+                  <input
+                    type="number"
+                    value={verifyData.unitsDonated}
+                    onChange={(e) => setVerifyData({ ...verifyData, unitsDonated: e.target.value })}
+                    min="1"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white focus:outline-none"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Verification Comment (Mandatory for AI Check)</label>
+                <textarea
+                  value={verifyData.feedback}
+                  onChange={(e) => setVerifyData({ ...verifyData, feedback: e.target.value })}
+                  placeholder="e.g. Donor successfully completed donation of 1 unit at our blood drive center."
+                  className="w-full h-24 bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-white placeholder-slate-650 focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div className="flex gap-4 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setIsVerifyModalOpen(false)}
+                  className="w-1/2 py-3 bg-slate-800 text-slate-200 rounded-xl text-sm font-semibold transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={verifyLoading}
+                  className="w-1/2 py-3 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white rounded-xl text-sm font-semibold shadow-lg transition flex justify-center items-center gap-2"
+                >
+                  {verifyLoading ? 'Checking Collusion...' : 'Approve & Reward'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -2,8 +2,9 @@ const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const User = require('./models/User');
 const BloodRequest = require('./models/BloodRequest');
+const path = require('path');
 
-dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, '.env') });
 
 const getCompatibleBloodTypes = (recipientType) => {
   const compatibility = {
